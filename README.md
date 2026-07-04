@@ -52,6 +52,20 @@ gh repo create gcode-node-workflow --public --source=. --remote=origin --push
 
 ### Cloudflare Pages
 
+当前项目已经部署到：
+
+```text
+https://gcode-node-workflow.pages.dev/
+```
+
+手动重新部署：
+
+```bash
+npm run deploy
+```
+
+如果要开启 GitHub push 后自动部署：
+
 1. 打开 Cloudflare Dashboard。
 2. 进入 `Workers & Pages`。
 3. 选择 `Create application`。
