@@ -4,6 +4,6 @@
   "private": true,
   "scripts": {
     "start": "python3 serve.py --port 8765",
-    "deploy": "rm -rf /tmp/gcode-node-workflow-deploy && mkdir -p /tmp/gcode-node-workflow-deploy && cp index.html gcode_node_workflow.html README.md /tmp/gcode-node-workflow-deploy/ && wrangler pages deploy /tmp/gcode-node-workflow-deploy --project-name gcode-node-workflow --branch main"
+    "deploy": "rm -rf /tmp/gcode-node-workflow-deploy && mkdir -p /tmp/gcode-node-workflow-deploy && cp index.html gcode_node_workflow.html README.md /tmp/gcode-node-workflow-deploy/ && npx wrangler pages deploy /tmp/gcode-node-workflow-deploy --project-name gcode-node-workflow --branch main"
   }
 }
