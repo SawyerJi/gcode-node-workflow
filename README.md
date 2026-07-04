@@ -2,6 +2,10 @@
 
 一个纯前端 G-code 节点工作流工具。
 
+## Online
+
+https://gcode-node-workflow.pages.dev/
+
 ## 工作流
 
 ```text
