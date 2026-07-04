@@ -1,0 +1,649 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>G-code 节点工作流</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #101214;
+      --panel: #191d20;
+      --node: #22272b;
+      --node-2: #2a3035;
+      --text: #eef2f3;
+      --muted: #98a2a8;
+      --line: #59636b;
+      --blue: #5aa9e6;
+      --green: #66d19e;
+      --yellow: #e6bd5a;
+      --red: #f27878;
+      --border: #343c42;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: var(--bg);
+      color: var(--text);
+      font: 14px/1.45 Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    button,
+    input {
+      font: inherit;
+    }
+
+    .app {
+      display: grid;
+      grid-template-rows: 56px 1fr;
+      min-height: 100vh;
+    }
+
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 0 18px;
+      border-bottom: 1px solid var(--border);
+      background: #15181a;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: 18px;
+      font-weight: 700;
+      letter-spacing: 0;
+    }
+
+    .actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .btn {
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: #242a2f;
+      color: var(--text);
+      min-height: 36px;
+      padding: 0 12px;
+      cursor: pointer;
+    }
+
+    .btn.primary {
+      background: var(--blue);
+      border-color: var(--blue);
+      color: #071016;
+      font-weight: 700;
+    }
+
+    .btn:disabled {
+      cursor: not-allowed;
+      opacity: .5;
+    }
+
+    main {
+      display: grid;
+      grid-template-columns: minmax(760px, 1fr) 360px;
+      min-height: 0;
+    }
+
+    .canvas {
+      position: relative;
+      overflow: auto;
+      min-height: calc(100vh - 56px);
+      background:
+        linear-gradient(rgba(255,255,255,.035) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255,255,255,.035) 1px, transparent 1px),
+        #101214;
+      background-size: 24px 24px;
+    }
+
+    .stage {
+      position: relative;
+      width: 1460px;
+      height: 760px;
+    }
+
+    svg.links {
+      position: absolute;
+      inset: 0;
+      width: 1460px;
+      height: 760px;
+      pointer-events: none;
+    }
+
+    .link {
+      fill: none;
+      stroke: var(--line);
+      stroke-width: 3;
+    }
+
+    .link.active {
+      stroke: var(--green);
+    }
+
+    .node {
+      position: absolute;
+      width: 240px;
+      min-height: 124px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--node);
+      box-shadow: 0 14px 34px rgba(0, 0, 0, .28);
+      overflow: hidden;
+    }
+
+    .node.done {
+      border-color: rgba(102, 209, 158, .75);
+    }
+
+    .node.warn {
+      border-color: rgba(230, 189, 90, .8);
+    }
+
+    .node-head {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 12px;
+      background: var(--node-2);
+      border-bottom: 1px solid var(--border);
+    }
+
+    .icon {
+      display: grid;
+      place-items: center;
+      width: 30px;
+      height: 30px;
+      border-radius: 6px;
+      background: rgba(90, 169, 230, .16);
+      color: var(--blue);
+      flex: 0 0 auto;
+    }
+
+    .node-title {
+      min-width: 0;
+    }
+
+    .node-title strong {
+      display: block;
+      font-size: 14px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .node-title span,
+    .status {
+      display: block;
+      color: var(--muted);
+      font-size: 12px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .node-body {
+      padding: 12px;
+    }
+
+    .ports {
+      display: flex;
+      justify-content: space-between;
+      margin-bottom: 10px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .port {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: var(--line);
+    }
+
+    .dot.active {
+      background: var(--green);
+    }
+
+    .field {
+      display: grid;
+      gap: 6px;
+      margin-top: 10px;
+    }
+
+    label {
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    input[type="file"],
+    input[type="number"] {
+      width: 100%;
+      min-height: 34px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 6px 8px;
+      background: #121517;
+      color: var(--text);
+    }
+
+    .sidebar {
+      border-left: 1px solid var(--border);
+      background: var(--panel);
+      min-height: 0;
+      padding: 16px;
+      overflow: auto;
+    }
+
+    .panel {
+      margin-bottom: 18px;
+    }
+
+    .panel h2 {
+      margin: 0 0 10px;
+      font-size: 14px;
+    }
+
+    .metric {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 12px;
+      padding: 9px 0;
+      border-bottom: 1px solid var(--border);
+      color: var(--muted);
+    }
+
+    .metric strong {
+      color: var(--text);
+      font-weight: 600;
+    }
+
+    .log {
+      min-height: 190px;
+      max-height: 270px;
+      overflow: auto;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px;
+      background: #0e1012;
+      color: #cdd5d9;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 12px;
+      white-space: pre-wrap;
+    }
+
+    .preview {
+      width: 100%;
+      min-height: 220px;
+      resize: vertical;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px;
+      background: #0e1012;
+      color: #cdd5d9;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 12px;
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      min-height: 24px;
+      padding: 0 8px;
+      border-radius: 999px;
+      background: #273039;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    @media (max-width: 980px) {
+      main {
+        grid-template-columns: 1fr;
+      }
+
+      .sidebar {
+        border-left: 0;
+        border-top: 1px solid var(--border);
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <header>
+      <h1>G-code 节点工作流</h1>
+      <div class="actions">
+        <span class="badge">边界 Z = <span id="boundaryBadge">6</span>mm</span>
+        <button class="btn" id="resetBtn" type="button">重置</button>
+        <button class="btn primary" id="runBtn" type="button" disabled>生成最终 G-code</button>
+      </div>
+    </header>
+
+    <main>
+      <section class="canvas" aria-label="节点画布">
+        <div class="stage">
+          <svg class="links" viewBox="0 0 1280 760" aria-hidden="true">
+            <path id="l1" class="link" d="M 270 165 C 350 165, 350 165, 430 165"></path>
+            <path id="l2" class="link" d="M 670 165 C 745 165, 745 95, 820 95"></path>
+            <path id="l3" class="link" d="M 670 165 C 745 165, 745 235, 820 235"></path>
+            <path id="l4" class="link" d="M 270 395 C 545 395, 545 360, 820 360"></path>
+            <path id="l5" class="link" d="M 1060 95 C 1120 95, 1120 235, 1180 235"></path>
+            <path id="l6" class="link" d="M 1060 360 C 1120 360, 1120 235, 1180 235"></path>
+            <path id="l7" class="link" d="M 1060 235 C 1120 235, 1120 235, 1180 235"></path>
+          </svg>
+
+          <article class="node" id="modelNode" style="left: 30px; top: 105px;">
+            <div class="node-head">
+              <div class="icon">IN</div>
+              <div class="node-title">
+                <strong>模型 G-code</strong>
+                <span>已切片模型入口</span>
+              </div>
+            </div>
+            <div class="node-body">
+              <div class="ports"><span class="port"><span class="dot"></span>输入</span><span class="port">模型流<span class="dot" id="modelOut"></span></span></div>
+              <input id="modelFile" type="file" accept=".gcode,.gco,.gc,.txt">
+              <span class="status" id="modelStatus">等待导入</span>
+            </div>
+          </article>
+
+          <article class="node" id="splitNode" style="left: 430px; top: 105px;">
+            <div class="node-head">
+              <div class="icon">6</div>
+              <div class="node-title">
+                <strong>6mm 拆分</strong>
+                <span>X / Y 分流</span>
+              </div>
+            </div>
+            <div class="node-body">
+              <div class="ports"><span class="port"><span class="dot" id="splitIn"></span>模型</span><span class="port">X/Y<span class="dot" id="splitOut"></span></span></div>
+              <div class="field">
+                <label for="boundaryInput">边界高度 mm</label>
+                <input id="boundaryInput" type="number" min="0" step="0.1" value="6">
+              </div>
+              <span class="status" id="splitStatus">等待模型 G-code</span>
+            </div>
+          </article>
+
+          <article class="node" id="xNode" style="left: 820px; top: 35px;">
+            <div class="node-head">
+              <div class="icon">X</div>
+              <div class="node-title">
+                <strong>打印 X</strong>
+                <span>A/B 交界打印段</span>
+              </div>
+            </div>
+            <div class="node-body">
+              <div class="ports"><span class="port"><span class="dot" id="xIn"></span>X</span><span class="port">完成<span class="dot" id="xOut"></span></span></div>
+              <span class="status" id="xStatus">未生成</span>
+            </div>
+          </article>
+
+          <article class="node" id="yNode" style="left: 820px; top: 175px;">
+            <div class="node-head">
+              <div class="icon">Y</div>
+              <div class="node-title">
+                <strong>打印 Y</strong>
+                <span>B 剩余模型段</span>
+              </div>
+            </div>
+            <div class="node-body">
+              <div class="ports"><span class="port"><span class="dot" id="yIn"></span>Y</span><span class="port">完成<span class="dot" id="yOut"></span></span></div>
+              <span class="status" id="yStatus">未生成</span>
+            </div>
+          </article>
+
+          <article class="node" id="cutNode" style="left: 30px; top: 335px;">
+            <div class="node-head">
+              <div class="icon">Z</div>
+              <div class="node-title">
+                <strong>切割 G-code</strong>
+                <span>用户导入 Z 流程</span>
+              </div>
+            </div>
+            <div class="node-body">
+              <div class="ports"><span class="port"><span class="dot"></span>输入</span><span class="port">Z<span class="dot" id="cutOut"></span></span></div>
+              <input id="cutFile" type="file" accept=".gcode,.gco,.gc,.txt">
+              <span class="status" id="cutStatus">等待导入</span>
+            </div>
+          </article>
+
+          <article class="node" id="waitNode" style="left: 820px; top: 300px;">
+            <div class="node-head">
+              <div class="icon">10</div>
+              <div class="node-title">
+                <strong>等待节点</strong>
+                <span>X 后 10s / Z 后 10s</span>
+              </div>
+            </div>
+            <div class="node-body">
+              <div class="ports"><span class="port"><span class="dot" id="waitIn"></span>暂停</span><span class="port">继续<span class="dot" id="waitOut"></span></span></div>
+              <span class="status">输出 G4 S10</span>
+            </div>
+          </article>
+
+          <article class="node" id="outNode" style="left: 1180px; top: 175px; width: 250px;">
+            <div class="node-head">
+              <div class="icon">OUT</div>
+              <div class="node-title">
+                <strong>最终 G-code</strong>
+                <span>X → 10s → Z → 10s → Y</span>
+              </div>
+            </div>
+            <div class="node-body">
+              <div class="ports"><span class="port"><span class="dot" id="outIn"></span>合并</span><span class="port">文件<span class="dot" id="outDot"></span></span></div>
+              <button class="btn" id="downloadBtn" type="button" disabled>下载 final.gcode</button>
+              <span class="status" id="outStatus">等待生成</span>
+            </div>
+          </article>
+        </div>
+      </section>
+
+      <aside class="sidebar">
+        <section class="panel">
+          <h2>状态</h2>
+          <div class="metric"><span>模型文件</span><strong id="modelName">未导入</strong></div>
+          <div class="metric"><span>切割文件</span><strong id="cutName">未导入</strong></div>
+          <div class="metric"><span>X 行数</span><strong id="xLines">0</strong></div>
+          <div class="metric"><span>Z 行数</span><strong id="zLines">0</strong></div>
+          <div class="metric"><span>Y 行数</span><strong id="yLines">0</strong></div>
+        </section>
+
+        <section class="panel">
+          <h2>运行日志</h2>
+          <div class="log" id="log">等待导入文件...</div>
+        </section>
+
+        <section class="panel">
+          <h2>输出预览</h2>
+          <textarea class="preview" id="preview" readonly></textarea>
+        </section>
+      </aside>
+    </main>
+  </div>
+
+  <script>
+    const state = {
+      modelName: "",
+      cutName: "",
+      modelText: "",
+      cutText: "",
+      xText: "",
+      yText: "",
+      finalText: ""
+    };
+
+    const $ = (id) => document.getElementById(id);
+
+    function setLog(lines) {
+      $("log").textContent = Array.isArray(lines) ? lines.join("\n") : lines;
+    }
+
+    function lineCount(text) {
+      if (!text) return 0;
+      return text.split(/\r\n|\r|\n/).length;
+    }
+
+    function readFile(file, key, nameKey, statusId, nameId) {
+      const reader = new FileReader();
+      reader.onload = () => {
+        state[key] = String(reader.result || "");
+        state[nameKey] = file.name;
+        $(statusId).textContent = `${file.name} · ${lineCount(state[key])} 行`;
+        $(nameId).textContent = file.name;
+        updateAvailability();
+      };
+      reader.readAsText(file);
+    }
+
+    function parseZMove(line) {
+      const command = line.split(";", 1)[0];
+      if (!/^\s*(G0|G1)\b/i.test(command)) return null;
+      const match = command.match(/(?<![A-Za-z])Z\s*([-+]?\d*\.?\d+)/i);
+      return match ? Number(match[1]) : null;
+    }
+
+    function splitModelGcode(text, boundary) {
+      const lines = text.match(/[^\n]*\n|[^\n]+$/g) || [];
+      const splitIndex = lines.findIndex((line) => {
+        const z = parseZMove(line);
+        return z !== null && z >= boundary;
+      });
+
+      if (splitIndex < 0) {
+        throw new Error(`模型 G-code 中没有找到 Z >= ${boundary}mm 的 G0/G1 移动`);
+      }
+
+      return {
+        x: lines.slice(0, splitIndex + 1).join(""),
+        y: lines.slice(splitIndex + 1).join(""),
+        splitLine: splitIndex + 1
+      };
+    }
+
+    function buildFinalGcode(x, z, y, boundary) {
+      return [
+        `\n; ---- BEGIN X: MODEL PRINT BEFORE/AT ${boundary}MM ----\n`,
+        x,
+        "\n; ---- END X ----\n",
+        "\n; ---- WAIT BEFORE CUTTING ----\n",
+        "G4 S10\n",
+        "\n; ---- BEGIN Z: IMPORTED CUTTING G-CODE ----\n",
+        z,
+        "\n; ---- END Z ----\n",
+        "\n; ---- WAIT BEFORE Y ----\n",
+        "G4 S10\n",
+        `\n; ---- BEGIN Y: MODEL PRINT AFTER ${boundary}MM ----\n`,
+        y,
+        "\n; ---- END Y ----\n"
+      ].join("");
+    }
+
+    function activate(ids, isActive) {
+      ids.forEach((id) => $(id).classList.toggle("active", isActive));
+    }
+
+    function markNode(id, status) {
+      $(id).classList.remove("done", "warn");
+      if (status) $(id).classList.add(status);
+    }
+
+    function updateAvailability() {
+      const ready = Boolean(state.modelText && state.cutText);
+      $("runBtn").disabled = !ready;
+      activate(["modelOut", "splitIn", "cutOut"], Boolean(state.modelText || state.cutText));
+      markNode("modelNode", state.modelText ? "done" : "");
+      markNode("cutNode", state.cutText ? "done" : "");
+      setLog(ready ? "文件已就绪，可以生成最终 G-code。" : "等待导入模型 G-code 和切割 G-code...");
+    }
+
+    function runWorkflow() {
+      const boundary = Number($("boundaryInput").value || 6);
+      $("boundaryBadge").textContent = boundary;
+
+      try {
+        const split = splitModelGcode(state.modelText, boundary);
+        state.xText = split.x;
+        state.yText = split.y;
+        state.finalText = buildFinalGcode(split.x, state.cutText, split.y, boundary);
+
+        $("xLines").textContent = lineCount(state.xText);
+        $("zLines").textContent = lineCount(state.cutText);
+        $("yLines").textContent = lineCount(state.yText);
+        $("splitStatus").textContent = `第 ${split.splitLine} 行后拆分`;
+        $("xStatus").textContent = `${lineCount(state.xText)} 行`;
+        $("yStatus").textContent = `${lineCount(state.yText)} 行`;
+        $("outStatus").textContent = "已生成";
+        $("preview").value = state.finalText.slice(0, 12000);
+        $("downloadBtn").disabled = false;
+
+        activate(["splitOut", "xIn", "xOut", "yIn", "yOut", "waitIn", "waitOut", "outIn", "outDot"], true);
+        ["l1", "l2", "l3", "l4", "l5", "l6", "l7"].forEach((id) => $(id).classList.add("active"));
+        ["splitNode", "xNode", "yNode", "waitNode", "outNode"].forEach((id) => markNode(id, "done"));
+
+        setLog([
+          `边界高度: ${boundary}mm`,
+          `拆分位置: 模型 G-code 第 ${split.splitLine} 行之后`,
+          `X: ${lineCount(state.xText)} 行`,
+          `Z: ${lineCount(state.cutText)} 行`,
+          `Y: ${lineCount(state.yText)} 行`,
+          "执行顺序: X -> G4 S10 -> Z -> G4 S10 -> Y"
+        ]);
+      } catch (error) {
+        markNode("splitNode", "warn");
+        $("splitStatus").textContent = "拆分失败";
+        setLog(error.message);
+      }
+    }
+
+    function downloadFinal() {
+      const blob = new Blob([state.finalText], { type: "text/plain;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "final.gcode";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    }
+
+    function reset() {
+      location.reload();
+    }
+
+    $("modelFile").addEventListener("change", (event) => {
+      const file = event.target.files[0];
+      if (file) readFile(file, "modelText", "modelName", "modelStatus", "modelName");
+    });
+
+    $("cutFile").addEventListener("change", (event) => {
+      const file = event.target.files[0];
+      if (file) readFile(file, "cutText", "cutName", "cutStatus", "cutName");
+    });
+
+    $("boundaryInput").addEventListener("input", () => {
+      $("boundaryBadge").textContent = $("boundaryInput").value || "6";
+    });
+
+    $("runBtn").addEventListener("click", runWorkflow);
+    $("downloadBtn").addEventListener("click", downloadFinal);
+    $("resetBtn").addEventListener("click", reset);
+  </script>
+</body>
+</html>
